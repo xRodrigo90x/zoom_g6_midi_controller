@@ -1,0 +1,9 @@
+# Binarios y temporales de compilación
+build/
+sdkconfig
+sdkconfig.old
+
+# Archivos del IDE
+.settings/
+.project
+.cproject
