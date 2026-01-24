@@ -1,136 +1,145 @@
-/*
- * SPDX-FileCopyrightText: 2021-2024 Espressif Systems (Shanghai) CO LTD
- *
- * SPDX-License-Identifier: Unlicense OR CC0-1.0
- */
-
+#include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/queue.h"
-#include "freertos/event_groups.h"
-#include "esp_log.h"
-#include "esp_intr_alloc.h"
-#include "usb/usb_host.h"
 #include "driver/gpio.h"
+#include "esp_log.h"
+#include "led_strip.h"
+#include "esp_timer.h"
+#include "usb/usb_host.h"
+#include "class_driver.h"
 
-#define HOST_LIB_TASK_PRIORITY    2
-#define CLASS_TASK_PRIORITY       3
-#define APP_QUIT_PIN              CONFIG_APP_QUIT_PIN
+#define PIN_TIRA 39
+#define NUM_LEDS 8
+#define CANTIDAD 8
+#define TIEMPO_STANDBY 15000000 
 
-extern void class_driver_task(void *arg);
-extern void class_driver_client_deregister(void);
+static const char *TAG = "MAIN_HW";
+static const gpio_num_t pinesBotones[CANTIDAD] = { GPIO_NUM_13, GPIO_NUM_12, GPIO_NUM_11, GPIO_NUM_10, GPIO_NUM_9, GPIO_NUM_8, GPIO_NUM_7, GPIO_NUM_6 };
+static led_strip_handle_t led_strip;
+static int ultimoLedEncendido = -1;
+static int64_t ultimaVezInteractuado = 0;
+static bool enModoStandBy = false;
 
-static const char *TAG = "USB_MAIN";
-QueueHandle_t app_event_queue = NULL;
-
-typedef enum {
-    APP_EVENT = 0,
-} app_event_group_t;
-
-typedef struct {
-    app_event_group_t event_group;
-} app_event_queue_t;
-
-/**
- * @brief Callback del botón BOOT para salir de la aplicación
- */
-static void gpio_cb(void *arg)
-{
-    const app_event_queue_t evt_queue = {
-        .event_group = APP_EVENT,
-    };
-    BaseType_t xTaskWoken = pdFALSE;
-    if (app_event_queue) {
-        xQueueSendFromISR(app_event_queue, &evt_queue, &xTaskWoken);
-    }
-    if (xTaskWoken == pdTRUE) {
-        portYIELD_FROM_ISR();
-    }
+uint32_t color_wheel(uint8_t pos) {
+    pos = 255 - pos;
+    if (pos < 85) return ((uint32_t)(255 - pos * 3) << 16) | (pos * 3);
+    if (pos < 170) { pos -= 85; return ((uint32_t)(pos * 3) << 8) | (255 - pos * 3); }
+    pos -= 170;
+    return ((uint32_t)(pos * 3) << 16) | ((uint32_t)(255 - pos * 3) << 8);
 }
 
-/**
- * @brief Tarea principal de la librería USB Host
- */
-static void usb_host_lib_task(void *arg)
-{
-    ESP_LOGI(TAG, "Instalando USB Host Library");
-    usb_host_config_t host_config = {
-        .skip_phy_setup = false,
-        .intr_flags = ESP_INTR_FLAG_LEVEL1,
-    };
-    ESP_ERROR_CHECK(usb_host_install(&host_config));
+void efectoStandBy(void) {
+    static uint8_t hue = 0;
+    for (int j = 0; j < NUM_LEDS; j++) {
+        uint32_t col = color_wheel((hue + j * 32) & 255);
+        led_strip_set_pixel(led_strip, j, (col >> 16) & 0xFF, (col >> 8) & 0xFF, col & 0xFF);
+    }
+    led_strip_refresh(led_strip);
+    hue++;
+}
 
-    // Notificar a app_main que la librería está instalada
-    xTaskNotifyGive(arg);
+void secuencia_bloqueante_inicial(void) {
+    // 1. Azul
+    for (int i = 0; i < NUM_LEDS; i++) {
+        led_strip_set_pixel(led_strip, i, 0, 0, 100); 
+        led_strip_refresh(led_strip);
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    led_strip_clear(led_strip);
+    led_strip_refresh(led_strip);
 
-    bool has_clients = true;
-    bool has_devices = false;
-    while (has_clients) {
-        uint32_t event_flags;
-        ESP_ERROR_CHECK(usb_host_lib_handle_events(portMAX_DELAY, &event_flags));
-        if (event_flags & USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS) {
-            if (ESP_OK == usb_host_device_free_all()) {
-                has_clients = false;
-            } else {
-                has_devices = true;
+    // 2. Espera 5 segundos
+    vTaskDelay(pdMS_TO_TICKS(5000));
+
+    // 3. Arcoiris 4 veces
+    for (int loops = 0; loops < 4; loops++) {
+        for (int hue = 0; hue < 256; hue += 5) {
+            for (int j = 0; j < NUM_LEDS; j++) {
+                uint32_t col = color_wheel((hue + j * 32) & 255);
+                led_strip_set_pixel(led_strip, j, (col >> 16) & 0xFF, (col >> 8) & 0xFF, col & 0xFF);
             }
-        }
-        if (has_devices && event_flags & USB_HOST_LIB_EVENT_FLAGS_ALL_FREE) {
-            has_clients = false;
+            led_strip_refresh(led_strip);
+            vTaskDelay(pdMS_TO_TICKS(10));
         }
     }
 
-    ESP_LOGI(TAG, "Desinstalando USB Host Library");
-    ESP_ERROR_CHECK(usb_host_uninstall());
-    vTaskSuspend(NULL);
+    // 4. Morado 4 veces
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < NUM_LEDS; j++) led_strip_set_pixel(led_strip, j, 150, 0, 200);
+        led_strip_refresh(led_strip);
+        vTaskDelay(pdMS_TO_TICKS(300));
+        led_strip_clear(led_strip);
+        led_strip_refresh(led_strip);
+        vTaskDelay(pdMS_TO_TICKS(300));
+    }
 }
 
-void app_main(void)
-{
-    ESP_LOGI(TAG, "Iniciando ejemplo USB MIDI para Zoom G6");
+void hardware_control_task(void *arg) {
+    led_strip_config_t strip_config = { .strip_gpio_num = PIN_TIRA, .max_leds = NUM_LEDS, .led_pixel_format = LED_PIXEL_FORMAT_GRB, .led_model = LED_MODEL_WS2812 };
+    led_strip_rmt_config_t rmt_config = { .clk_src = RMT_CLK_SRC_DEFAULT, .resolution_hz = 10000000 };
+    led_strip_new_rmt_device(&strip_config, &rmt_config, &led_strip);
 
-    // Configuración del botón para cerrar la app
-    const gpio_config_t input_pin = {
-        .pin_bit_mask = BIT64(APP_QUIT_PIN),
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
-        .intr_type = GPIO_INTR_NEGEDGE,
-    };
-    ESP_ERROR_CHECK(gpio_config(&input_pin));
-    ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_LEVEL1));
-    ESP_ERROR_CHECK(gpio_isr_handler_add(APP_QUIT_PIN, gpio_cb, NULL));
+    for (int i = 0; i < CANTIDAD; i++) {
+        gpio_reset_pin(pinesBotones[i]);
+        gpio_set_direction(pinesBotones[i], GPIO_MODE_INPUT);
+        gpio_set_pull_mode(pinesBotones[i], GPIO_PULLUP_ONLY);
+    }
 
-    app_event_queue = xQueueCreate(10, sizeof(app_event_queue_t));
-    app_event_queue_t evt_queue;
+    secuencia_bloqueante_inicial();
+    ultimaVezInteractuado = esp_timer_get_time();
 
-    TaskHandle_t host_lib_task_hdl, class_driver_task_hdl;
-
-    // Crear tarea de la librería
-    xTaskCreatePinnedToCore(usb_host_lib_task, "usb_host", 4096, xTaskGetCurrentTaskHandle(), HOST_LIB_TASK_PRIORITY, &host_lib_task_hdl, 0);
-
-    // Esperar a que la librería se instale
-    ulTaskNotifyTake(false, 1000);
-
-    // Crear tarea del driver de clase (donde está tu código MIDI)
-    xTaskCreatePinnedToCore(class_driver_task, "class", 4096, NULL, CLASS_TASK_PRIORITY, &class_driver_task_hdl, 0);
-
-    // Bucle principal: Esperar evento de salida
     while (1) {
-        if (xQueueReceive(app_event_queue, &evt_queue, portMAX_DELAY)) {
-            if (APP_EVENT == evt_queue.event_group) {
-                ESP_LOGW(TAG, "Saliendo del programa...");
-                break;
+        int64_t tiempoAhora = esp_timer_get_time();
+        bool algunBotonPulsado = false;
+
+        for (int i = 0; i < CANTIDAD; i++) {
+            if (gpio_get_level(pinesBotones[i]) == 0) { 
+                algunBotonPulsado = true;
+                if (enModoStandBy) {
+                    enModoStandBy = false;
+                    led_strip_clear(led_strip);
+                } else {
+                    if (midi_msg_queue != NULL) {
+                        midi_msg_t msg = { .data1 = (uint8_t)i }; 
+                        xQueueSend(midi_msg_queue, &msg, 0);
+                    }
+                    led_strip_clear(led_strip);
+                    if (i < 4) led_strip_set_pixel(led_strip, i, 0, 200, 0); // Verde para Z
+                    else led_strip_set_pixel(led_strip, i, 0, 0, 200);      // Azul para AA
+                    ultimoLedEncendido = i;
+                }
+                led_strip_refresh(led_strip);
+                ultimaVezInteractuado = tiempoAhora;
+                vTaskDelay(pdMS_TO_TICKS(250)); 
             }
         }
-    }
 
-    // Limpieza al salir
-    class_driver_client_deregister();
-    vTaskDelay(20);
-    vTaskDelete(class_driver_task_hdl);
-    vTaskDelete(host_lib_task_hdl);
-    gpio_isr_handler_remove(APP_QUIT_PIN);
-    vQueueDelete(app_event_queue);
-    
-    ESP_LOGI(TAG, "Programa terminado");
+        if (!algunBotonPulsado && (tiempoAhora - ultimaVezInteractuado > TIEMPO_STANDBY)) {
+            enModoStandBy = true;
+            efectoStandBy(); 
+        } else if (!enModoStandBy && ultimoLedEncendido != -1 && !algunBotonPulsado) {
+            if (ultimoLedEncendido < 4) led_strip_set_pixel(led_strip, ultimoLedEncendido, 0, 200, 0);
+            else led_strip_set_pixel(led_strip, ultimoLedEncendido, 0, 0, 200);
+            led_strip_refresh(led_strip);
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+}
+
+void usb_host_lib_task(void *arg) {
+    const usb_host_config_t host_config = { .intr_flags = ESP_INTR_FLAG_LEVEL1 };
+    usb_host_install(&host_config);
+    xTaskNotifyGive((TaskHandle_t)arg);
+    while (1) {
+        usb_host_lib_handle_events(portMAX_DELAY, NULL);
+    }
+}
+
+void app_main(void) {
+    midi_msg_queue = xQueueCreate(10, sizeof(midi_msg_t));
+    xTaskCreatePinnedToCore(hardware_control_task, "hw", 4096, NULL, 5, NULL, 1);
+    TaskHandle_t main_hdl = xTaskGetCurrentTaskHandle();
+    xTaskCreatePinnedToCore(usb_host_lib_task, "usb", 4096, (void *)main_hdl, 2, NULL, 0);
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    xTaskCreatePinnedToCore(class_driver_task, "midi", 4096, NULL, 3, NULL, 0);
 }
