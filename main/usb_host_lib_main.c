@@ -11,7 +11,8 @@
 #define PIN_TIRA 39
 #define NUM_LEDS 8
 #define CANTIDAD 8
-#define TIEMPO_STANDBY 15000000 
+// TIEMPO_STANDBY configurado a 1 minuto (60,000,000 microsegundos)
+#define TIEMPO_STANDBY 60000000LL 
 
 static const char *TAG = "MAIN_HW";
 static const gpio_num_t pinesBotones[CANTIDAD] = { GPIO_NUM_13, GPIO_NUM_12, GPIO_NUM_11, GPIO_NUM_10, GPIO_NUM_9, GPIO_NUM_8, GPIO_NUM_7, GPIO_NUM_6 };
@@ -32,26 +33,25 @@ void efectoStandBy(void) {
     static uint8_t hue = 0;
     for (int j = 0; j < NUM_LEDS; j++) {
         uint32_t col = color_wheel((hue + j * 32) & 255);
-        led_strip_set_pixel(led_strip, j, (col >> 16) & 0xFF, (col >> 8) & 0xFF, col & 0xFF);
+        led_strip_set_pixel(led_strip, j, ((col >> 16) & 0xFF) / 10, ((col >> 8) & 0xFF) / 10, (col & 0xFF) / 10);
     }
     led_strip_refresh(led_strip);
     hue++;
 }
 
 void secuencia_bloqueante_inicial(void) {
+    ESP_LOGI(TAG, "Iniciando secuencia de bienvenida...");
+    vTaskDelay(pdMS_TO_TICKS(5000));
+
     // 1. Azul
     for (int i = 0; i < NUM_LEDS; i++) {
         led_strip_set_pixel(led_strip, i, 0, 0, 100); 
         led_strip_refresh(led_strip);
         vTaskDelay(pdMS_TO_TICKS(50));
     }
-    led_strip_clear(led_strip);
-    led_strip_refresh(led_strip);
-
-    // 2. Espera 5 segundos
     vTaskDelay(pdMS_TO_TICKS(5000));
 
-    // 3. Arcoiris 4 veces
+    // 2. Arcoiris 4 veces
     for (int loops = 0; loops < 4; loops++) {
         for (int hue = 0; hue < 256; hue += 5) {
             for (int j = 0; j < NUM_LEDS; j++) {
@@ -63,7 +63,7 @@ void secuencia_bloqueante_inicial(void) {
         }
     }
 
-    // 4. Morado 4 veces
+    // 3. Morado 4 veces
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < NUM_LEDS; j++) led_strip_set_pixel(led_strip, j, 150, 0, 200);
         led_strip_refresh(led_strip);
@@ -72,6 +72,7 @@ void secuencia_bloqueante_inicial(void) {
         led_strip_refresh(led_strip);
         vTaskDelay(pdMS_TO_TICKS(300));
     }
+    ESP_LOGI(TAG, "Hardware listo.");
 }
 
 void hardware_control_task(void *arg) {
@@ -104,8 +105,7 @@ void hardware_control_task(void *arg) {
                         xQueueSend(midi_msg_queue, &msg, 0);
                     }
                     led_strip_clear(led_strip);
-                    if (i < 4) led_strip_set_pixel(led_strip, i, 0, 200, 0); // Verde para Z
-                    else led_strip_set_pixel(led_strip, i, 0, 0, 200);      // Azul para AA
+                    led_strip_set_pixel(led_strip, i, 0, 200, 0); // Verde para todos
                     ultimoLedEncendido = i;
                 }
                 led_strip_refresh(led_strip);
@@ -118,8 +118,7 @@ void hardware_control_task(void *arg) {
             enModoStandBy = true;
             efectoStandBy(); 
         } else if (!enModoStandBy && ultimoLedEncendido != -1 && !algunBotonPulsado) {
-            if (ultimoLedEncendido < 4) led_strip_set_pixel(led_strip, ultimoLedEncendido, 0, 200, 0);
-            else led_strip_set_pixel(led_strip, ultimoLedEncendido, 0, 0, 200);
+            led_strip_set_pixel(led_strip, ultimoLedEncendido, 0, 200, 0);
             led_strip_refresh(led_strip);
         }
         vTaskDelay(pdMS_TO_TICKS(20));
@@ -135,11 +134,20 @@ void usb_host_lib_task(void *arg) {
     }
 }
 
+// ESTA PARTE ES LA QUE FALTABA O TENÍA ERROR DE ENLACE
 void app_main(void) {
+    ESP_LOGI(TAG, "Iniciando Aplicacion...");
     midi_msg_queue = xQueueCreate(10, sizeof(midi_msg_t));
+    
+    // Core 1 para Hardware y LEDs
     xTaskCreatePinnedToCore(hardware_control_task, "hw", 4096, NULL, 5, NULL, 1);
+    
+    // Core 0 para USB
     TaskHandle_t main_hdl = xTaskGetCurrentTaskHandle();
     xTaskCreatePinnedToCore(usb_host_lib_task, "usb", 4096, (void *)main_hdl, 2, NULL, 0);
+    
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    
+    // Tarea MIDI
     xTaskCreatePinnedToCore(class_driver_task, "midi", 4096, NULL, 3, NULL, 0);
 }
