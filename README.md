@@ -23,13 +23,13 @@ La lógica está diseñada para alternar entre los bancos extremos del sistema m
 ### 2. Feedback Visual y UI
 * **Secuencia de Boot (Failsafe):** 5s silencio → Barrido Azul → 5 ciclos Arcoíris → 5 ráfagas Moradas (Confirmación visual de inicialización de periféricos).
 * **Estado Activo:** Iluminación Verde de alta intensidad `(0, 200, 0)` para el LED del parche seleccionado.
-* **Modo Standby:** Tras 10 minutos de inactividad, se activa un ciclo de arcoíris dinámico de bajo brillo para indicación de sistema "Alive" y protección de componentes.
+* **Modo Standby:** Tras 8 minutos de inactividad, se activa un ciclo de arcoíris dinámico de bajo brillo para indicación de sistema "Alive" y protección de componentes.
 
 ## 🔧 Configuración Crítica del Hardware y Entorno
 
 ### A. Gestión de Puertos USB-C
 El ESP32-S3 dispone habitualmente de dos puertos USB-C. Para este proyecto:
-1.  **Puerto UART/USB:** Se utiliza para la programación y monitoreo serie (`idf.py monitor`).
+1.  **Puerto UART/USB:** Se utiliza para la programación, monitoreo serie (`idf.py monitor`), y su posterior alimentacion. 
 2.  **Puerto USB-OTG (Nativo):** Es el puerto donde se conecta la **Zoom G6**. Internamente, el S3 utiliza este puerto para el stack de USB Host. No es necesario cablear pines externos, pero el firmware utiliza el periférico nativo asociado a GPIO 19/20 de forma interna.
 
 ### B. Modificación del Buffer de Transferencia (SDKConfig)
