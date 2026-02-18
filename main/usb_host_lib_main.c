@@ -11,8 +11,9 @@
 #define PIN_TIRA 39
 #define NUM_LEDS 8
 #define CANTIDAD 8
-// TIEMPO_STANDBY configurado a 1 minuto (60,000,000 microsegundos)
-#define TIEMPO_STANDBY 60000000LL 
+
+// TIEMPO_STANDBY configurado a 10 minuto (600,000,000 microsegundos)
+#define TIEMPO_STANDBY (10LL * 60LL * 1000000LL)
 
 static const char *TAG = "MAIN_HW";
 static const gpio_num_t pinesBotones[CANTIDAD] = { GPIO_NUM_13, GPIO_NUM_12, GPIO_NUM_11, GPIO_NUM_10, GPIO_NUM_9, GPIO_NUM_8, GPIO_NUM_7, GPIO_NUM_6 };
@@ -41,6 +42,7 @@ void efectoStandBy(void) {
 
 void secuencia_bloqueante_inicial(void) {
     ESP_LOGI(TAG, "Iniciando secuencia de bienvenida...");
+
     vTaskDelay(pdMS_TO_TICKS(5000));
 
     // 1. Azul
