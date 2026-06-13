@@ -47,6 +47,11 @@ Para procesar ráfagas MIDI complejas (Bank MSB + LSB + PC) sin pérdida de paqu
 2.  Navegar a **Component config** -> **USB Host Stack**.
 3.  Ajustar **Config Descriptor Buffer** a `2048`.
 
+### D. Compilacion del codigo
+Asegúrate de tener activa tu terminal con las variables de entorno de ESP-IDF instaladas y ejecuta:
+```bash
+idf.py build
+```
 
 > [!IMPORTANT]
 > Este ajuste es vital para prevenir desbordamientos de buffer y disparos accidentales del Task Watchdog (WDT).

@@ -7,3 +7,5 @@ sdkconfig.old
 .settings/
 .project
 .cproject
+
+managed_components
