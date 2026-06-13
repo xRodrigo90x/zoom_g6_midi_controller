@@ -32,11 +32,18 @@ El ESP32-S3 dispone habitualmente de dos puertos USB-C. Para este proyecto:
 1.  **Puerto UART/USB:** Se utiliza para la programación, monitoreo serie (`idf.py monitor`), y su posterior alimentacion. 
 2.  **Puerto USB-OTG (Nativo):** Es el puerto donde se conecta la **Zoom G6**. Internamente, el S3 utiliza este puerto para el stack de USB Host. No es necesario cablear pines externos, pero el firmware utiliza el periférico nativo asociado a GPIO 19/20 de forma interna.
 
-### B. Modificación del Buffer de Transferencia (SDKConfig)
+### B. Establecer el Microcontrolador Objetivo
+Asegúrate de tener activa tu terminal con las variables de entorno de ESP-IDF instaladas y ejecuta:
+```bash
+idf.py set-target esp32s3
+```
+
+### C. Modificación del Buffer de Transferencia (SDKConfig)
 Para procesar ráfagas MIDI complejas (Bank MSB + LSB + PC) sin pérdida de paquetes:
 1.  Ejecutar `idf.py menuconfig`.
 2.  Navegar a **Component config** -> **USB Host Stack**.
 3.  Ajustar **Config Descriptor Buffer** a `2048`.
+
 
 > [!IMPORTANT]
 > Este ajuste es vital para prevenir desbordamientos de buffer y disparos accidentales del Task Watchdog (WDT).
