@@ -27,6 +27,9 @@ La lógica está diseñada para alternar entre los bancos extremos del sistema m
 
 ## 🔧 Configuración Crítica del Hardware y Entorno
 
+> [!TIP]
+> Se recomienda encarecidamente utilizar el terminal específico de Espressif (**ESP-IDF Command Prompt** en Windows o ejecutar el script exportador `. ./export.sh` en Linux/macOS) para garantizar que todas las herramientas y rutas de compilación (`python`, `cmake`, `ninja`) estén correctamente mapeadas.
+
 ### A. Gestión de Puertos USB-C
 El ESP32-S3 dispone habitualmente de dos puertos USB-C. Para este proyecto:
 1.  **Puerto UART/USB:** Se utiliza para la programación, monitoreo serie (`idf.py monitor`), y su posterior alimentacion. 
